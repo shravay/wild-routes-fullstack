@@ -28,6 +28,7 @@ public class PostController {
     private final FollowerRepository followerRepository;
     private final LikeRepository likeRepository;
     private final CommentRepository commentRepository;
+    private final PostViewRepository postViewRepository;
     private final String uploadDir;
 
     public PostController(PostRepository postRepository,
@@ -36,6 +37,7 @@ public class PostController {
                           FollowerRepository followerRepository,
                           LikeRepository likeRepository,
                           CommentRepository commentRepository,
+                          PostViewRepository postViewRepository,
                           @Value("${wildroutes.storage.upload-dir}") String uploadDir) {
         this.postRepository = postRepository;
         this.userRepository = userRepository;
@@ -43,6 +45,7 @@ public class PostController {
         this.followerRepository = followerRepository;
         this.likeRepository = likeRepository;
         this.commentRepository = commentRepository;
+        this.postViewRepository = postViewRepository;
         this.uploadDir = uploadDir;
     }
 
@@ -135,10 +138,25 @@ public class PostController {
     }
 
     @GetMapping("/posts/{id}")
-    public ResponseEntity<Post> getPost(@PathVariable Long id) {
-        return postRepository.findById(id)
-                .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
+    public ResponseEntity<Post> getPost(@PathVariable Long id,
+                                        @AuthenticationPrincipal CustomUserDetails current) {
+        Post post = postRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Post not found with id: " + id));
+
+        // Record view if user is authenticated
+        if (current != null) {
+            Long userId = current.getId();
+            postViewRepository.findByUserIdAndPostId(userId, id)
+                    .orElseGet(() -> postViewRepository.save(
+                            PostView.builder()
+                                    .user(userRepository.findById(userId).orElse(null))
+                                    .post(post)
+                                    .viewedAt(Instant.now())
+                                    .build()
+                    ));
+        }
+
+        return ResponseEntity.ok(post);
     }
 
     @PostMapping("/posts/{id}/like")
@@ -149,7 +167,7 @@ public class PostController {
         Long userId = current.getId();
         likeRepository.findByUserIdAndPostId(userId, post.getId())
                 .orElseGet(() -> likeRepository.save(
-                        Like.builder().user(post.getUser()).post(post).build()
+                        Like.builder().user(userRepository.findById(userId).orElse(null)).post(post).build()
                 ));
         return ResponseEntity.ok().build();
     }
